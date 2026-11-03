@@ -1,20 +1,31 @@
 name: Model Training CICD
+
 permissions:
   id-token: write
   contents: write
+
 on:
   push:
+    branches:
+      - main
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install system dependencies
         run: |
@@ -26,7 +37,8 @@ jobs:
             libgif-dev \
             librsvg2-dev
 
-      - uses: iterative/setup-cml@v2
+      - name: Setup CML
+        uses: iterative/setup-cml@v2
 
       - name: Train model
         env:
@@ -41,6 +53,7 @@ jobs:
           echo "Confusion Matrix & Feature Importance images are available in the Artifacts section of this run." > report1.md
 
           cat report.md report1.md > combined_file.md
+
           cml comment create combined_file.md
 
       - name: Upload results
