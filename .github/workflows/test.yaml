@@ -1,33 +1,42 @@
-name: Model Training CICD
 
-permissions:
-  id-token: write
-  contents: write
+name: Model Training CICD
 
 on:
   push:
     branches:
       - main
 
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  issues: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout repository
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # Step 2: Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # Step 3: Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
-      - name: Install system dependencies
+      # Step 4: Install system dependencies
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -37,26 +46,42 @@ jobs:
             libgif-dev \
             librsvg2-dev
 
+      # Step 5: Setup CML
       - name: Setup CML
         uses: iterative/setup-cml@v2
 
-      - name: Train model
+      # Step 6: Install dependencies and train model
+      - name: Train Model
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
+
           python train_model.py
 
-          echo "RF and LR Model Score" > report.md
-          cat scores.txt >> report.md
+      # Step 7: Generate CML report
+      - name: Generate Model Report
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "# RF and LR Model Scores" > report.md
 
-          echo "Confusion Matrix & Feature Importance images are available in the Artifacts section of this run." > report1.md
+          if [ -f scores.txt ]; then
+            cat scores.txt >> report.md
+          else
+            echo "Error: scores.txt was not generated." >> report.md
+            exit 1
+          fi
 
-          cat report.md report1.md > combined_file.md
+          echo "" >> report.md
+          echo "## Model Visualizations" >> report.md
+          echo "Confusion Matrix and Feature Importance images are available in the Artifacts section of this workflow run." >> report.md
 
-          cml comment create combined_file.md
+          cml comment create report.md
 
-      - name: Upload results
+      # Step 8: Upload results
+      - name: Upload Model Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -65,3 +90,5 @@ jobs:
             scores.txt
             ConfusionMatrix.png
             FeatureImportance.png
+          if-no-files-found: warn
+          retention-days: 30
