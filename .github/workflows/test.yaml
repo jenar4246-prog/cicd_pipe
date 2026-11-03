@@ -16,25 +16,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
-      # 3. Setup Python
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: requirements.txt
 
-      # 4. Install system dependencies
+      - name: Create Results Directory
+        run: |
+          mkdir -p results
+          echo "Model training started." > results/status.txt
+
       - name: Install System Dependencies
         run: |
           sudo apt-get update
@@ -45,82 +44,71 @@ jobs:
             libgif-dev \
             librsvg2-dev
 
-      # 5. Setup CML
       - name: Setup CML
         uses: iterative/setup-cml@v2
-        with:
-          vega: false
 
-      # 6. Install Python dependencies
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 7. Train model
       - name: Train Model
+        id: training
+        continue-on-error: true
         run: |
           python train_model.py
 
-      # 8. Collect generated files
       - name: Collect Model Results
         if: always()
         run: |
           mkdir -p results
 
-          find . -type f \
+          find . -maxdepth 4 -type f \
             \( -name "scores.txt" \
             -o -name "ConfusionMatrix.png" \
             -o -name "FeatureImportance.png" \) \
             -not -path "./results/*" \
-            -exec cp --parents {} results/ \;
+            -not -path "./.git/*" \
+            -exec cp -t results/ {} +
 
-          echo "Generated result files:"
-          find results -type f -print
+          echo "Model training completed." > results/status.txt
 
-          if [ -z "$(find results -type f -print -quit)" ]; then
-            echo "ERROR: No model result files were generated."
-            exit 1
-          fi
+          echo "Available files:"
+          ls -lh results/
 
-      # 9. Generate report
       - name: Generate Model Report
-        if: success()
+        if: always()
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "# RF and LR Model Scores" > report.md
+          {
+            echo "# Model Training Report"
+            echo ""
+            echo "## Training Results"
+            echo ""
 
-          SCORE_FILE=$(find results -name "scores.txt" -print -quit)
-
-          if [ -n "$SCORE_FILE" ]; then
-            cat "$SCORE_FILE" >> report.md
-          else
-            echo "Scores file was not generated." >> report.md
-          fi
-
-          echo "" >> report.md
-          echo "## Model Results" >> report.md
-
-          for file in \
-            "ConfusionMatrix.png" \
-            "FeatureImportance.png"
-          do
-            IMAGE_FILE=$(find results -name "$file" -print -quit)
-
-            if [ -n "$IMAGE_FILE" ]; then
-              echo "Found: $IMAGE_FILE" >> report.md
+            if [ -f results/scores.txt ]; then
+              cat results/scores.txt
+            else
+              echo "No scores.txt generated."
             fi
-          done
 
-          cml comment create report.md
+            echo ""
+            echo "## Generated Files"
+            ls -1 results/
+          } > results/report.md
 
-      # 10. Upload results
       - name: Upload Model Results
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: model-results
           path: results/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Check Training Status
+        if: always() && steps.training.outcome == 'failure'
+        run: |
+          echo "Model training failed. Check the Train Model logs."
+          exit 1
