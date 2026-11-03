@@ -20,13 +20,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      # 2. Setup Node.js 24
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
-      # 3. Setup Python 3.12
+      # 3. Setup Python
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -48,9 +48,11 @@ jobs:
       # 5. Setup CML
       - name: Setup CML
         uses: iterative/setup-cml@v2
+        with:
+          vega: false
 
       # 6. Install Python dependencies
-      - name: Install Python Dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -60,35 +62,65 @@ jobs:
         run: |
           python train_model.py
 
-      # 8. Generate model report
-      - name: Generate Model Report
-        env:
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 8. Collect generated files
+      - name: Collect Model Results
+        if: always()
         run: |
-          if [ ! -f scores.txt ]; then
-            echo "Error: scores.txt not found!"
+          mkdir -p results
+
+          find . -type f \
+            \( -name "scores.txt" \
+            -o -name "ConfusionMatrix.png" \
+            -o -name "FeatureImportance.png" \) \
+            -not -path "./results/*" \
+            -exec cp --parents {} results/ \;
+
+          echo "Generated result files:"
+          find results -type f -print
+
+          if [ -z "$(find results -type f -print -quit)" ]; then
+            echo "ERROR: No model result files were generated."
             exit 1
           fi
 
+      # 9. Generate report
+      - name: Generate Model Report
+        if: success()
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           echo "# RF and LR Model Scores" > report.md
-          echo "" >> report.md
-          cat scores.txt >> report.md
+
+          SCORE_FILE=$(find results -name "scores.txt" -print -quit)
+
+          if [ -n "$SCORE_FILE" ]; then
+            cat "$SCORE_FILE" >> report.md
+          else
+            echo "Scores file was not generated." >> report.md
+          fi
 
           echo "" >> report.md
-          echo "## Model Visualizations" >> report.md
-          echo "Confusion Matrix and Feature Importance are available in the workflow artifacts." >> report.md
+          echo "## Model Results" >> report.md
+
+          for file in \
+            "ConfusionMatrix.png" \
+            "FeatureImportance.png"
+          do
+            IMAGE_FILE=$(find results -name "$file" -print -quit)
+
+            if [ -n "$IMAGE_FILE" ]; then
+              echo "Found: $IMAGE_FILE" >> report.md
+            fi
+          done
 
           cml comment create report.md
 
-      # 9. Upload model results
+      # 10. Upload results
       - name: Upload Model Results
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: model-results
-          path: |
-            scores.txt
-            ConfusionMatrix.png
-            FeatureImportance.png
+          path: results/
           if-no-files-found: warn
           retention-days: 30
